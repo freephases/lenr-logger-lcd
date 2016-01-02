@@ -3,7 +3,7 @@
 *
 * Mini pro code to bv4242
 *
-* Version 0.0.1.0
+* Version 0.0.1.1
 * todo: tidy up, sort out menu items to have more menus
 */
 #include <SoftwareSerial.h>
@@ -232,25 +232,36 @@ void defaultView()
   //sprintf todo
   //%-10s
   char lcdBuffer[17];
-  String tempStr = String(masterData.tc1);
-  char floatBuf[9];
-  tempStr.concat("C");
-  tempStr.toCharArray(floatBuf, 9);
   
-  String tempStr2 = String(masterData.tc2);
+  
+   char floatBuf[9];
+  if (isnan(masterData.tc1)) {
+    sprintf(floatBuf, "%s", "ERR TC1");
+  } else {
+    String tempStr = String(masterData.tc1, 2);
+   
+    tempStr.concat("C");
+    tempStr.toCharArray(floatBuf, 9);
+  }
   char floatBuf2[9];
+  if (isnan(masterData.tc2)) {
+    sprintf(floatBuf2, "%s", "ERR TC2");
+  } else {
+  String tempStr2 = String(masterData.tc2, 2);
+  
   tempStr2.concat("C");
   tempStr2.toCharArray(floatBuf2, 9);
+  }
   
-  String tempStr3 = String(masterData.power);
+  String tempStr3 = String(masterData.power, 1);
   char floatBuf3[9];
   tempStr3.concat("W");
-  tempStr3.toCharArray(floatBuf3, 8);
+  tempStr3.toCharArray(floatBuf3, 7);
   
-  String tempStr4 = String(masterData.psi);
+  String tempStr4 = String(masterData.psi, 0);
   char floatBuf4[9];
-  tempStr4.concat(" PSI");
-  tempStr4.toCharArray(floatBuf4, 6);
+  tempStr4.concat("p");
+  tempStr4.toCharArray(floatBuf4, 7);
      
   sprintf(lcdBuffer, "%-8s%6s", floatBuf, floatBuf3);
    ui.print( lcdBuffer);
