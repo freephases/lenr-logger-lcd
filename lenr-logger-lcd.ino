@@ -1,10 +1,14 @@
 /**
 * Lcd Slave for LENR logger
 *
-* Mini pro code to bv4242
+* Mini pro code for a bv4242 Lcd/Keypad
+* see: http://www.pichips.co.uk/index.php/BV4242#arduino
 *
-* Version 0.0.1.1
+* Version 0.0.1.2
+*  added 'E' error message view, display error message until esc or menu buttons are hit 
 * todo: tidy up, sort out menu items to have more menus
+
+* see: https://github.com/DavidAndrews/Arduino_LCD_Menu - example of oop menu system but not what i need - somehting like effects unit menus from 1980's, maybe when i have more time will write it 
 */
 #include <SoftwareSerial.h>
 
@@ -28,12 +32,14 @@ typedef struct {
 
 LenrLoggerData masterData;
 
+// Screen views
 #define LLSM_LOADING 199
 #define LLSM_READY 0
 #define LLSM_MENU 1
 #define LLSM_RUNNING 2
 #define LLSM_STOPPED 3
 #define LLSM_TIMER 4
+#define LLSM_ERROR 5
 
 //menu screens
 #define LLM_MAIN 0
@@ -71,6 +77,8 @@ char inByte = 0;
 
 char masterMessageLine1[17];
 char masterMessageLine2[17];
+
+char errorMessage[17];
 
 void resetMasterData() 
 {
@@ -130,7 +138,13 @@ void processMastersRequest() {
   if (serialBuffer[0]!='*' && serialBuffer[strlen(serialBuffer)-1]!='!') return;//check we have full data string ending with '!'
   
   switch (recordType) {
-           
+    case 'E' : // Error message, user must press Esc to return to last screen      
+        getValue(serialBuffer, '|', 1).toCharArray(errorMessage, 17);
+        lastScreenMode = screenMode;
+        screenMode = LLSM_ERROR;
+        ui.clrBuf(); // keypad buffer
+        ui.clear(); // display      
+      break;
     case 'S' : // Run stopped
       if (isTimerRunning) {
         isTimerRunning = false;
@@ -254,25 +268,22 @@ void defaultView()
   }
   
   String tempStr3 = String(masterData.power, 1);
-  char floatBuf3[9];
+  char floatBuf3[7];
   tempStr3.concat("W");
   tempStr3.toCharArray(floatBuf3, 7);
   
-  String tempStr4 = String(masterData.psi, 0);
-  char floatBuf4[9];
+  String tempStr4 = String(masterData.psi);
+  char floatBuf4[7];
   tempStr4.concat("p");
   tempStr4.toCharArray(floatBuf4, 7);
      
   sprintf(lcdBuffer, "%-8s%6s", floatBuf, floatBuf3);
-   ui.print( lcdBuffer);
- // ui.print(          "24.14C   0.0W ");
+  ui.print( lcdBuffer);
   printRunStatus(1);
   
   ui.setCursor(1, 2);
   sprintf(lcdBuffer, "%-8s%6s", floatBuf2, floatBuf4);
-   ui.print( lcdBuffer);
-   
-  //ui.print("24.32C   0 PSI ");
+  ui.print( lcdBuffer);
   printRunStatus(2);
 
   int  k = 0;
@@ -330,7 +341,6 @@ void displayMainMenu ()
   ui.cursor(); // turn on cursor
 
   int  k = 0;
-  int count = 0;
   while (true) {
     k = ui.key();
 
@@ -359,11 +369,8 @@ void displayMainMenu ()
     }
 
     delay(10);
-    count++;
   }
 }
-
-
 
 void displayTimerView()
 {
@@ -381,6 +388,28 @@ void displayTimerView()
   while (count<25) {
     k = ui.key();
     if (k == LLK_ESC) {
+      screenMode = lastScreenMode;
+      ui.clrBuf(); // keypad buffer
+      ui.clear(); // display      
+      return;
+    } 
+    delay(10);
+    count++;
+  }
+}
+
+void displayErrorView()
+{
+  ui.noCursor();
+  ui.setCursor(1, 1);
+  ui.print("ERROR **********");
+  ui.setCursor(1, 2);
+  ui.print(errorMessage);
+  int count = 0;
+  int k = 0;
+  while (count<100) {
+    k = ui.key();
+    if (k == LLK_ESC||k == LLK_ENTER) {
       screenMode = lastScreenMode;
       ui.clrBuf(); // keypad buffer
       ui.clear(); // display      
@@ -415,6 +444,7 @@ boolean  processLinePosKeys(int k) {
 
 void menuView()
 {
+  //lib i found is not very good at display so needs work, is basic 1980's OOP menu pattern, should be one already written some where
   switch ( menu ) {
     case LLM_MAIN:
       displayMainMenu();
@@ -426,6 +456,7 @@ void menuView()
 
 void setup()
 {
+   Serial.println("*** LENR Logger ***");
   Serial.begin(9600);
   master.begin(9600);
   //  ui.lcd_contrast(45);  // 3V3 contrast
@@ -447,7 +478,7 @@ void setup()
   ui.clear(); // display
   ui.clrBuf(); // keypad buffer
 };
-unsigned long lastDisplayTimerViewMillis = 0;
+
 void loop()
 {
   processMasterSerial();
@@ -464,15 +495,12 @@ void loop()
     case  LLSM_RUNNING: 
       defaultView();
       break;
-    /*case  LLSM_RUNNING: 
-        if (millis()-lastDisplayTimerViewMillis>5000) { 
-            displayTimerView(); 
-            lastDisplayTimerViewMillis = millis();
-        }
-        else defaultView();
-      break;*/
     case LLSM_TIMER:
       displayTimerView();
+      break;
+      
+    case LLSM_ERROR:
+      displayErrorView();
       break;
   }
 }
