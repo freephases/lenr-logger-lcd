@@ -5,10 +5,10 @@
 * see: http://www.pichips.co.uk/index.php/BV4242#arduino
 *
 * Version 0.0.1.2
-*  added 'E' error message view, display error message until esc or menu buttons are hit 
+*  added 'E' error message view, display error message until esc or menu buttons are hit
 * todo: tidy up, sort out menu items to have more menus
 
-* see: https://github.com/DavidAndrews/Arduino_LCD_Menu - example of oop menu system but not what i need - somehting like effects unit menus from 1980's, maybe when i have more time will write it 
+* see: https://github.com/DavidAndrews/Arduino_LCD_Menu - example of oop menu system but not what i need - somehting like effects unit menus from 1980's, maybe when i have more time will write it
 */
 #include <SoftwareSerial.h>
 
@@ -43,6 +43,8 @@ LenrLoggerData masterData;
 
 //menu screens
 #define LLM_MAIN 0
+#define LLM_MODE 1
+#define LLM_SPEED 2
 #define LLM_SET_TIMER 1
 #define LLM_SET_TEMP 2
 #define LLM_SET_WIFI 3
@@ -53,7 +55,7 @@ LenrLoggerData masterData;
 #define LLK_UP 1
 #define LLK_DOWN 9
 #define LLK_RUN 16
-#define LLK_STOP 8 
+#define LLK_STOP 8
 #define LLK_TIMER 7
 
 //todo
@@ -64,12 +66,15 @@ int screenMode = LLSM_LOADING;
 int lastScreenMode = LLSM_READY;
 int menuItem = 0;
 int lastMenuItem = 0;
+int modeMenuItem = 0;
 int menu = LLM_MAIN;
 boolean isTimerRunning = false; // is a run
 
 boolean tickOrTock = false;
 int runTimeLeft = 0;
 int runTotalTime = 0;
+int hBridgeOldSpeed = 0;
+int hBridgeSpeed = 0;
 
 short pos = 0; // position in read serialBuffer
 char serialBuffer[ROB_WS_MAX_STRING_DATA_LENGTH + 1];
@@ -80,7 +85,7 @@ char masterMessageLine2[17];
 
 char errorMessage[17];
 
-void resetMasterData() 
+void resetMasterData()
 {
   masterData.tc1 = 0.00;
   masterData.tc2 = 0.00;
@@ -93,10 +98,21 @@ void sendCommand(char c)
   char cmd[10];
   sprintf(cmd, "%c|!", c);
   master.println(cmd);
-   if (DEBUG_TO_SERIAL == 1) {
-        Serial.print("REQUEST SENT: ");
-        Serial.println(cmd);
-      }
+  if (DEBUG_TO_SERIAL == 1) {
+    Serial.print("REQUEST SENT: ");
+    Serial.println(cmd);
+  }
+}
+
+void sendCommand(char c, int i)
+{
+  char cmd[10];
+  sprintf(cmd, "%c|%d|!", c, i);
+  master.println(cmd);
+  if (DEBUG_TO_SERIAL == 1) {
+    Serial.print("REQUEST SENT: ");
+    Serial.println(cmd);
+  }
 }
 
 /**
@@ -135,16 +151,17 @@ void processMasterSerial()
 
 void processMastersRequest() {
   char recordType = serialBuffer[0];
-  if (serialBuffer[0]!='*' && serialBuffer[strlen(serialBuffer)-1]!='!') return;//check we have full data string ending with '!'
-  
+  if (serialBuffer[0] != '*' && serialBuffer[strlen(serialBuffer) - 1] != '!') return; //check we have full data string ending with '!'
+
   switch (recordType) {
-    case 'E' : // Error message, user must press Esc to return to last screen      
-        getValue(serialBuffer, '|', 1).toCharArray(errorMessage, 17);
-        lastScreenMode = screenMode;
-        screenMode = LLSM_ERROR;
-        ui.clrBuf(); // keypad buffer
-        ui.clear(); // display      
+    case 'E' : // Error message, user must press Esc to return to last screen
+      getValue(serialBuffer, '|', 1).toCharArray(errorMessage, 17);
+      lastScreenMode = screenMode;
+      screenMode = LLSM_ERROR;
+      ui.clrBuf(); // keypad buffer
+      ui.clear(); // display
       break;
+      
     case 'S' : // Run stopped
       if (isTimerRunning) {
         isTimerRunning = false;
@@ -154,6 +171,7 @@ void processMastersRequest() {
         ui.clear(); // display
       }
       break;
+      
     case 'R' : // Run started ok
       if (!isTimerRunning) {
         isTimerRunning = true;
@@ -164,7 +182,7 @@ void processMastersRequest() {
       }
       break;
 
-    case 'D' : // New data      
+    case 'D' : // New data
       masterData.tc1 = getValue(serialBuffer, '|', 1).toFloat();
       masterData.tc2 = getValue(serialBuffer, '|', 2).toFloat();
       masterData.power = getValue(serialBuffer, '|', 3).toFloat();
@@ -172,46 +190,50 @@ void processMastersRequest() {
       runTimeLeft = getValue(serialBuffer, '|', 5).toInt();
       runTotalTime = getValue(serialBuffer, '|', 6).toInt();
       break;
-     
-    case 'M' : // Message line 1   
-      getValue(serialBuffer, '|', 1).toCharArray(masterMessageLine1, 17);   
-      ui.setCursor(1, 1);  
+
+    case 'M' : // Message line 1
+      getValue(serialBuffer, '|', 1).toCharArray(masterMessageLine1, 17);
+      ui.setCursor(1, 1);
       ui.print("Loading: ");
       ui.print(masterMessageLine1);
-      
       break;
-      
-    case 'm' : // Message line 2     
-      getValue(serialBuffer, '|', 1).toCharArray(masterMessageLine2, 17);     
-      ui.setCursor(1, 2);  
+
+    case 'm' : // Message line 2
+      getValue(serialBuffer, '|', 1).toCharArray(masterMessageLine2, 17);
+      ui.setCursor(1, 2);
       ui.print(masterMessageLine2);
-      
       break;
-      
-   case 'C' : // Loading Completed     
+
+    case 'C' : // Loading Completed
       ui.clrBuf(); // keypad buffer
       ui.clear(); // display
       screenMode = LLSM_READY;
       break;
+
+    case 'A' : // Auto mode set ok
+      modeMenuItem = 0;
+      break;
       
+    case 'a' : // Manual mode set ok
+      modeMenuItem = 1;
+      break;
       
-   case 'A' : // Auto mode set ok  
-      menuItem = 0;
-      break;   
-   case 'a' : // Manual mode set ok  
-      menuItem = 1;
-      break;   
+    case 'H': // set hbridge speed
+      hBridgeSpeed = getValue(serialBuffer, '|', 1).toInt();
+      hBridgeOldSpeed = hBridgeSpeed;
+      break;
       
     case '*' : //hand shake / reset
       master.print("**\n");
       menuItem = 0;
-      if (screenMode!=LLSM_LOADING) {
-       isTimerRunning = false;
-       lastScreenMode = LLSM_READY;
-       screenMode = LLSM_LOADING;
-       menu = LLM_MAIN;
-       ui.clrBuf(); // keypad buffer
-       ui.clear(); // display
+      modeMenuItem = 0;
+      if (screenMode != LLSM_LOADING) {
+        isTimerRunning = false;
+        lastScreenMode = LLSM_READY;
+        screenMode = LLSM_LOADING;
+        menu = LLM_MAIN;
+        ui.clrBuf(); // keypad buffer
+        ui.clear(); // display
       }
       break;
   }
@@ -232,7 +254,7 @@ void printRunStatus(int lineNumber) {
       else ui.print("  ");
     }
     else {
-       ui.print("  ");
+      ui.print("  ");
     }
   }
 }
@@ -246,14 +268,14 @@ void defaultView()
   //sprintf todo
   //%-10s
   char lcdBuffer[17];
-  
-  
-   char floatBuf[9];
+
+
+  char floatBuf[9];
   if (isnan(masterData.tc1)) {
     sprintf(floatBuf, "%s", "ERR TC1");
   } else {
     String tempStr = String(masterData.tc1, 2);
-   
+
     tempStr.concat("C");
     tempStr.toCharArray(floatBuf, 9);
   }
@@ -261,26 +283,26 @@ void defaultView()
   if (isnan(masterData.tc2)) {
     sprintf(floatBuf2, "%s", "ERR TC2");
   } else {
-  String tempStr2 = String(masterData.tc2, 2);
-  
-  tempStr2.concat("C");
-  tempStr2.toCharArray(floatBuf2, 9);
+    String tempStr2 = String(masterData.tc2, 2);
+
+    tempStr2.concat("C");
+    tempStr2.toCharArray(floatBuf2, 9);
   }
-  
+
   String tempStr3 = String(masterData.power, 1);
   char floatBuf3[7];
   tempStr3.concat("W");
   tempStr3.toCharArray(floatBuf3, 7);
-  
+
   String tempStr4 = String(masterData.psi);
   char floatBuf4[7];
   tempStr4.concat("p");
   tempStr4.toCharArray(floatBuf4, 7);
-     
+
   sprintf(lcdBuffer, "%-8s%6s", floatBuf, floatBuf3);
   ui.print( lcdBuffer);
   printRunStatus(1);
-  
+
   ui.setCursor(1, 2);
   sprintf(lcdBuffer, "%-8s%6s", floatBuf2, floatBuf4);
   ui.print( lcdBuffer);
@@ -290,8 +312,8 @@ void defaultView()
   int count = 0;
   while (count < 50) {
     k = ui.key();
-     if (k == LLK_ENTER) {
-      lastScreenMode = screenMode;
+    if (k == LLK_ENTER) {
+      lastScreenMode = LLSM_RUNNING;
       screenMode = LLSM_MENU;
       menu = LLM_MAIN;
       lastMenuItem = menuItem;
@@ -300,15 +322,15 @@ void defaultView()
       return;
     } else if (!isTimerRunning && k == LLK_RUN) {
       sendCommand('R');
-      
+
       return;
     }  else if (isTimerRunning && k == LLK_STOP) {
-      
+
       sendCommand('S');
 
       return;
     } else if (isTimerRunning && k == LLK_TIMER) {
-      lastScreenMode = screenMode;
+      lastScreenMode = LLSM_RUNNING;
       screenMode = LLSM_TIMER;
       ui.clrBuf(); // keypad buffer
       ui.clear(); // display
@@ -322,20 +344,20 @@ void defaultView()
 
 
 
-//llMenuItems menuItems[10];//leave for now, menu items class not complete
+
 
 void displayMainMenu ()
 {
 
   ui.setCursor(1, 1);
   //sprintf
-  if (menuItem == 0) ui.print(">");
+  if (menuItem == 0) ui.print("*");
   else ui.print(" ");
-  ui.print(" AUTO PID MODE");
+  ui.print(" Mode          ");
   ui.setCursor(1, 2);
-  if (menuItem == 1) ui.print(">");
+  if (menuItem == 1) ui.print("*");
   else ui.print(" ");
-  ui.print(" MANUAL MODE");
+  ui.print(" H-bridge speed");
 
   ui.setCursor(1, menuItem + 1); //todo
   ui.cursor(); // turn on cursor
@@ -345,25 +367,119 @@ void displayMainMenu ()
     k = ui.key();
 
     if (k == LLK_ESC) {
-      screenMode = lastScreenMode;
+      screenMode = LLSM_RUNNING; //lastScreenMode;
       menuItem = lastMenuItem;
       ui.clrBuf(); // keypad buffer
       ui.clear(); // display
       ui.noCursor();
       return;
     } else if (k == LLK_ENTER) {
-      screenMode = lastScreenMode;
+      //screenMode = lastScreenMode;
       ui.clrBuf(); // keypad buffer
       ui.clear(); // display
       ui.noCursor();
-      ui.print(" Saving...");      
+      ui.clear(); // display
+      if (menuItem == 0) menu  = LLM_MODE;
+      else menu  = LLM_SPEED;
+      return;
+    } else {
+      if (processLinePosKeysMainMenu(k)) {
+        return;
+      }
+    }
+
+    delay(10);
+  }
+}
+
+void displayModeMenu ()
+{
+
+  ui.setCursor(1, 1);
+  //sprintf
+  if (modeMenuItem == 0) ui.print(">");
+  else ui.print(" ");
+  ui.print(" AUTO PID MODE ");
+  ui.setCursor(1, 2);
+  if (modeMenuItem == 1) ui.print(">");
+  else ui.print(" ");
+  ui.print(" MANUAL MODE   ");
+
+  ui.setCursor(1, modeMenuItem + 1); //todo
+  ui.cursor(); // turn on cursor
+
+  int  k = 0;
+  while (true) {
+    k = ui.key();
+
+    if (k == LLK_ESC) {
+      //screenMode = lastScreenMode;
+      menu = LLM_MAIN;
+      ui.clrBuf(); // keypad buffer
+      ui.clear(); // display
+      ui.noCursor();
+      return;
+    } else if (k == LLK_ENTER) {
+      //screenMode = lastScreenMode;
+      menu = LLM_MAIN;
+      ui.clrBuf(); // keypad buffer
+      ui.clear(); // display
+      ui.noCursor();
+      ui.print(" Saving...");
       delay(500);
       ui.clear(); // display
-      if (menuItem == 0) sendCommand('A');// auto run using masters plan once run button is hit
+      if (modeMenuItem == 0) sendCommand('A');// auto run using masters plan once run button is hit
       else sendCommand('M');// stop and start heater manually based on run and stop buttons
       return;
     } else {
-      if (processLinePosKeys(k)) {
+      if (processLinePosKeysModeMenu(k)) {
+        return;
+      }
+    }
+    delay(10);
+  }
+}
+
+void displaySpeedMenu ()
+{
+
+  ui.setCursor(1, 1);
+  //sprintf
+  ui.print(" Speed:");
+  ui.setCursor(1, 2);
+  ui.print(" ");
+  ui.print(hBridgeSpeed);
+  ui.print(" %");
+
+  ui.setCursor(2, 2);
+  ui.cursor(); // turn on cursor
+
+  int  k = 0;
+  while (true) {
+    k = ui.key();
+
+    if (k == LLK_ESC) {
+      //screenMode = lastScreenMode;
+      menu = LLM_MAIN;
+      ui.clrBuf(); // keypad buffer
+      ui.clear(); // display
+      ui.noCursor();
+      hBridgeSpeed = hBridgeOldSpeed;
+      return;
+    } else if (k == LLK_ENTER) {
+      //screenMode = lastScreenMode;
+      menu = LLM_MAIN;
+      ui.clrBuf(); // keypad buffer
+      ui.clear(); // display
+      ui.noCursor();
+      ui.print(" Saving...");
+      delay(500);
+      ui.clear(); // display
+      hBridgeOldSpeed = hBridgeSpeed;
+      sendCommand('H', hBridgeSpeed);
+      return;
+    } else {
+      if (processLinePosKeysSpeedMenu(k)) {
         return;
       }
     }
@@ -385,14 +501,14 @@ void displayTimerView()
   ui.print(tmpBuf);
   int count = 0;
   int k = 0;
-  while (count<25) {
+  while (count < 25) {
     k = ui.key();
     if (k == LLK_ESC) {
       screenMode = lastScreenMode;
       ui.clrBuf(); // keypad buffer
-      ui.clear(); // display      
+      ui.clear(); // display
       return;
-    } 
+    }
     delay(10);
     count++;
   }
@@ -407,14 +523,14 @@ void displayErrorView()
   ui.print(errorMessage);
   int count = 0;
   int k = 0;
-  while (count<100) {
+  while (count < 100) {
     k = ui.key();
-    if (k == LLK_ESC||k == LLK_ENTER) {
+    if (k == LLK_ESC || k == LLK_ENTER) {
       screenMode = lastScreenMode;
       ui.clrBuf(); // keypad buffer
-      ui.clear(); // display      
+      ui.clear(); // display
       return;
-    } 
+    }
     delay(10);
     count++;
   }
@@ -422,10 +538,27 @@ void displayErrorView()
 
 void displayLoadingScreen()
 {
- //nothing needs to update here, screen updated message commandZ are recieved  
+  //nothing needs to update here, screen updated message commandZ are recieved
 }
 
-boolean  processLinePosKeys(int k) {
+boolean  processLinePosKeysModeMenu(int k) {
+  switch ( k ) {
+    case LLK_DOWN:
+      modeMenuItem++;
+      if (modeMenuItem == 2) modeMenuItem = 1;
+      return true;
+      break;
+    case LLK_UP:
+      modeMenuItem--;
+      if (modeMenuItem < 0) modeMenuItem = 0;
+      return true;
+      break;
+  }
+
+  return false;
+}
+
+boolean  processLinePosKeysMainMenu(int k) {
   switch ( k ) {
     case LLK_DOWN:
       menuItem++;
@@ -442,12 +575,36 @@ boolean  processLinePosKeys(int k) {
   return false;
 }
 
+
+boolean  processLinePosKeysSpeedMenu(int k) {
+  switch ( k ) {
+    case LLK_DOWN:
+      hBridgeSpeed--;
+      if (hBridgeSpeed < 0) hBridgeSpeed = 0;
+      return true;
+      break;
+    case LLK_UP:
+      hBridgeSpeed++;
+      if (hBridgeSpeed > 100) hBridgeSpeed = 100;
+      return true;
+      break;
+  }
+
+  return false;
+}
+
 void menuView()
 {
   //lib i found is not very good at display so needs work, is basic 1980's OOP menu pattern, should be one already written some where
   switch ( menu ) {
     case LLM_MAIN:
       displayMainMenu();
+      break;
+    case LLM_MODE:
+      displayModeMenu();
+      break;
+    case LLM_SPEED:
+      displaySpeedMenu();
       break;
   }
 
@@ -456,7 +613,7 @@ void menuView()
 
 void setup()
 {
-   Serial.println("*** LENR Logger ***");
+  Serial.println("*** LENR Logger ***");
   Serial.begin(9600);
   master.begin(9600);
   //  ui.lcd_contrast(45);  // 3V3 contrast
@@ -471,7 +628,7 @@ void setup()
   delay(1500);
   ui.clear(); // display
   ui.lcd_mode(0); // single ht
-  if (DEBUG_TO_SERIAL==1){
+  if (DEBUG_TO_SERIAL == 1) {
     Serial.println("*** LENR Logger ***");
   }
   resetMasterData();
@@ -490,17 +647,14 @@ void loop()
     case LLSM_MENU:
       menuView();
       break;
-    case  LLSM_READY:   
-    case  LLSM_STOPPED:
-    case  LLSM_RUNNING: 
-      defaultView();
-      break;
     case LLSM_TIMER:
       displayTimerView();
       break;
-      
     case LLSM_ERROR:
       displayErrorView();
+      break;
+    default:
+      defaultView();
       break;
   }
 }
