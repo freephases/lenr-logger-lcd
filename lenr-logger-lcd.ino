@@ -26,8 +26,8 @@ BV4242 ui(0x3d);
 
 
 typedef struct {
-  float tc1, tc2, power;
-  int psi;
+  float tc1, tc2, power,psi;
+  int cpm;
 } LenrLoggerData;
 
 LenrLoggerData masterData;
@@ -75,6 +75,8 @@ int runTimeLeft = 0;
 int runTotalTime = 0;
 int hBridgeOldSpeed = 0;
 int hBridgeSpeed = 0;
+int totalProgramsToRun = 0;
+int currrentRunProgram = 0;
 
 short pos = 0; // position in read serialBuffer
 char serialBuffer[ROB_WS_MAX_STRING_DATA_LENGTH + 1];
@@ -186,9 +188,12 @@ void processMastersRequest() {
       masterData.tc1 = getValue(serialBuffer, '|', 1).toFloat();
       masterData.tc2 = getValue(serialBuffer, '|', 2).toFloat();
       masterData.power = getValue(serialBuffer, '|', 3).toFloat();
-      masterData.psi = getValue(serialBuffer, '|', 4).toInt();
-      runTimeLeft = getValue(serialBuffer, '|', 5).toInt();
-      runTotalTime = getValue(serialBuffer, '|', 6).toInt();
+      masterData.psi = getValue(serialBuffer, '|', 4).toFloat();
+      masterData.cpm = getValue(serialBuffer, '|', 5).toInt();
+      runTimeLeft = getValue(serialBuffer, '|', 6).toInt();
+      runTotalTime = getValue(serialBuffer, '|', 7).toInt();
+      totalProgramsToRun = getValue(serialBuffer, '|', 8).toInt();
+      currrentRunProgram = getValue(serialBuffer, '|', 9).toInt();
       break;
 
     case 'M' : // Message line 1
@@ -294,7 +299,7 @@ void defaultView()
   tempStr3.concat("W");
   tempStr3.toCharArray(floatBuf3, 7);
 
-  String tempStr4 = String(masterData.psi);
+  String tempStr4 = String(masterData.psi, 2);
   char floatBuf4[7];
   tempStr4.concat("p");
   tempStr4.toCharArray(floatBuf4, 7);
@@ -491,17 +496,23 @@ void displaySpeedMenu ()
 void displayTimerView()
 {
   char tmpBuf[17];
+  char tmpBuf2[17];
   ui.noCursor();
   ui.setCursor(1, 1);
   //todo display runTimeLeft which is in secs as hours, mins and secs
-  sprintf(tmpBuf, "Time : %-7d", runTimeLeft);
+  sprintf(tmpBuf, "ETA:   %d", runTimeLeft);
   ui.print(tmpBuf);
+  ui.setCursor(10, 1);
+  sprintf(tmpBuf2, "P %d/%d", currrentRunProgram, totalProgramsToRun);
+  sprintf(tmpBuf, "%7s", tmpBuf2);
+  ui.print(tmpBuf);
+  
   ui.setCursor(1, 2);
-  sprintf(tmpBuf, "Total: %-7d", runTotalTime);
+  sprintf(tmpBuf, "Total: %d", runTotalTime);
   ui.print(tmpBuf);
   int count = 0;
   int k = 0;
-  while (count < 25) {
+  while (count < 50) {
     k = ui.key();
     if (k == LLK_ESC) {
       screenMode = lastScreenMode;
