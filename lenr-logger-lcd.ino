@@ -16,17 +16,19 @@
 #include <Wire.h>
 
 SoftwareSerial master(6, 7);// RX, TX
+//SoftwareSerial lcd2(5, 4);// RX, TX
 
 // 7 bit adddress is used, address of pad, address of LCD
 BV4242 ui(0x3d);
 //8 = esc / cancel
 //16 = menu / ok
-#define DEBUG_TO_SERIAL 1
+#define DEBUG_TO_SERIAL 0
 #define ROB_WS_MAX_STRING_DATA_LENGTH 120
 
 
 typedef struct {
-  float tc1, tc2, power,psi;
+  float tc1, tc2, tc3, tc4, power,psi;
+  int tcEnabledCount;
   int cpm;
 } LenrLoggerData;
 
@@ -87,10 +89,90 @@ char masterMessageLine2[17];
 
 char errorMessage[17];
 
+void myPrint(char *s)
+{
+ //  Serial.print("$clear\n");
+   char buffer[33];
+   strcpy(buffer, "$print ");
+   strcat(buffer, s);
+   strcat(buffer, "\n");
+   Serial.print(buffer);
+}
+
+void printAt(char *s, int x, int y){
+  char buffer[33];
+  char numBuf[33];
+  
+  
+ itoa(x, numBuf,10);
+ strcpy(buffer, "$go ");
+ strcat(buffer, numBuf);
+
+ strcat(buffer, " ");
+
+ itoa(y, numBuf,10);
+ strcat(buffer, numBuf);
+ strcat(buffer, "\n");
+
+ Serial.print(buffer);
+ delay(40);
+
+// char buffer[33];
+   strcpy(buffer, "$print ");
+   strcat(buffer, s);
+   strcat(buffer, "\n");
+   Serial.print(buffer);
+   delay(40);
+}
+unsigned long lcd2UpdateLast = 0;
+void lcd2Update() 
+{
+ if (lcd2UpdateLast == 0 || millis()-lcd2UpdateLast>1110) {
+//  /lcd2.print("$clear\n");
+  lcd2UpdateLast = millis();
+  char floatBuf[9];
+  if (isnan(masterData.tc3)) {
+    sprintf(floatBuf, "%s", "ERR TC3");
+  } else {
+    String tempStr = String(masterData.tc3, 2);
+
+    tempStr.concat("C");
+    tempStr.toCharArray(floatBuf, 9);
+  }
+  char floatBuf2[9];
+  if (isnan(masterData.tc4)) {
+    sprintf(floatBuf2, "%s", "ERR TC4");
+  } else {
+    String tempStr2 = String(masterData.tc4, 2);
+
+    tempStr2.concat("C");
+    tempStr2.toCharArray(floatBuf2, 9);
+  }
+  char lcdBuffer[17];
+  sprintf(lcdBuffer, "Port 1: %8s", floatBuf);
+
+printAt(lcdBuffer,0,0);
+sprintf(lcdBuffer, "Port 2: %8s", floatBuf2);
+printAt(lcdBuffer,0,1);
+ }
+}
+
+void doCiticalProcesses(unsigned long timeout=10)
+{
+  unsigned long startTime = millis();  
+  processMasterSerial();  
+  lcd2Update();
+  if (millis()-startTime<timeout) {
+   delay(timeout-(millis()-startTime));
+  }
+}
+
 void resetMasterData()
 {
   masterData.tc1 = 0.00;
   masterData.tc2 = 0.00;
+  masterData.tc3 = 0.00;
+  masterData.tc4 = 0.00;
   masterData.power = 0.00;
   masterData.psi = 0;
 }
@@ -122,6 +204,8 @@ void sendCommand(char c, int i)
 */
 void processMasterSerial()
 {
+  
+  //master.listen();
   // send data only when you receive data:
   while (master.available() > 0)
   {
@@ -149,6 +233,12 @@ void processMasterSerial()
     }
 
   }
+  
+//  lcd2.listen();
+//  while (lcd2.available() > 0)
+//  {
+//    lcd2.read();
+//  }
 }
 
 void processMastersRequest() {
@@ -185,15 +275,29 @@ void processMastersRequest() {
       break;
 
     case 'D' : // New data
-      masterData.tc1 = getValue(serialBuffer, '|', 1).toFloat();
-      masterData.tc2 = getValue(serialBuffer, '|', 2).toFloat();
-      masterData.power = getValue(serialBuffer, '|', 3).toFloat();
-      masterData.psi = getValue(serialBuffer, '|', 4).toFloat();
-      masterData.cpm = getValue(serialBuffer, '|', 5).toInt();
-      runTimeLeft = getValue(serialBuffer, '|', 6).toInt();
-      runTotalTime = getValue(serialBuffer, '|', 7).toInt();
-      totalProgramsToRun = getValue(serialBuffer, '|', 8).toInt();
-      currrentRunProgram = getValue(serialBuffer, '|', 9).toInt();
+      
+      runTimeLeft = getValue(serialBuffer, '|', 1).toInt();
+      runTotalTime = getValue(serialBuffer, '|', 2).toInt();
+      totalProgramsToRun = getValue(serialBuffer, '|', 3).toInt();
+      
+      currrentRunProgram = getValue(serialBuffer, '|', 4).toInt();
+      //read tc values - can be 0 - 4 in total, can be set by logger SD card on master/host 
+      masterData.tcEnabledCount = getValue(serialBuffer, '|', 5).toInt();
+
+      masterData.power = getValue(serialBuffer, '|', 6).toFloat();
+      masterData.psi = getValue(serialBuffer, '|', 7).toFloat();
+      masterData.cpm = getValue(serialBuffer, '|', 8).toInt();
+     
+      if (masterData.tcEnabledCount>0)
+        masterData.tc1 = getValue(serialBuffer, '|', 9).toFloat();
+      if (masterData.tcEnabledCount>1)
+        masterData.tc2 = getValue(serialBuffer, '|', 10).toFloat();
+      if (masterData.tcEnabledCount>2)
+        masterData.tc3 = getValue(serialBuffer, '|', 11).toFloat();
+      if (masterData.tcEnabledCount>3)
+        masterData.tc4 = getValue(serialBuffer, '|', 12).toFloat();
+        
+       
       break;
 
     case 'M' : // Message line 1
@@ -266,6 +370,7 @@ void printRunStatus(int lineNumber) {
 
 void defaultView()
 {
+  
 
   // ui.clrBuf(); // keypad buffer
   ///ui.clear(); // display
@@ -312,6 +417,8 @@ void defaultView()
   sprintf(lcdBuffer, "%-8s%6s", floatBuf2, floatBuf4);
   ui.print( lcdBuffer);
   printRunStatus(2);
+  
+  
 
   int  k = 0;
   int count = 0;
@@ -342,7 +449,8 @@ void defaultView()
       return;
     }
 
-    delay(10);
+    //delay(10);
+    doCiticalProcesses();
     count++;
   }
 }
@@ -393,7 +501,8 @@ void displayMainMenu ()
       }
     }
 
-    delay(10);
+    //delay(10);
+    doCiticalProcesses();
   }
 }
 
@@ -431,7 +540,8 @@ void displayModeMenu ()
       ui.clear(); // display
       ui.noCursor();
       ui.print(" Saving...");
-      delay(500);
+      doCiticalProcesses(500);
+      //delay(500);
       ui.clear(); // display
       if (modeMenuItem == 0) sendCommand('A');// auto run using masters plan once run button is hit
       else sendCommand('M');// stop and start heater manually based on run and stop buttons
@@ -441,7 +551,8 @@ void displayModeMenu ()
         return;
       }
     }
-    delay(10);
+    //delay(10);
+    doCiticalProcesses();
   }
 }
 
@@ -478,7 +589,8 @@ void displaySpeedMenu ()
       ui.clear(); // display
       ui.noCursor();
       ui.print(" Saving...");
-      delay(500);
+      //delay(500);
+      doCiticalProcesses(500);
       ui.clear(); // display
       hBridgeOldSpeed = hBridgeSpeed;
       sendCommand('H', hBridgeSpeed);
@@ -489,7 +601,8 @@ void displaySpeedMenu ()
       }
     }
 
-    delay(10);
+    //delay(10);
+    doCiticalProcesses();
   }
 }
 
@@ -500,7 +613,7 @@ void displayTimerView()
   ui.noCursor();
   ui.setCursor(1, 1);
   //todo display runTimeLeft which is in secs as hours, mins and secs
-  sprintf(tmpBuf, "ETA:   %d", runTimeLeft);
+  sprintf(tmpBuf, "ETA: %d  ", runTimeLeft);
   ui.print(tmpBuf);
   ui.setCursor(10, 1);
   sprintf(tmpBuf2, "P %d/%d", currrentRunProgram, totalProgramsToRun);
@@ -520,7 +633,8 @@ void displayTimerView()
       ui.clear(); // display
       return;
     }
-    delay(10);
+    //delay(10);
+    doCiticalProcesses();
     count++;
   }
 }
@@ -542,7 +656,8 @@ void displayErrorView()
       ui.clear(); // display
       return;
     }
-    delay(10);
+    //delay(10);
+    doCiticalProcesses();
     count++;
   }
 }
@@ -621,12 +736,22 @@ void menuView()
 
 }
 
-
+void lcd2Setup()
+{
+//  lcd2.begin(9600);
+  Serial.print("$LCD1602\n$clear\n");
+ // Serial.print("$clear\n");
+  delay(30);
+  Serial.print("$Home\n");
+  
+}
 void setup()
 {
-  Serial.println("*** LENR Logger ***");
+  
   Serial.begin(9600);
+  //Serial.println("*** LENR Logger ***");
   master.begin(9600);
+ lcd2Setup();
   //  ui.lcd_contrast(45);  // 3V3 contrast
   ui.lcd_contrast(22);  // 5V contrast
   ui.noCursor();
@@ -645,7 +770,11 @@ void setup()
   resetMasterData();
   ui.clear(); // display
   ui.clrBuf(); // keypad buffer
-};
+  printAt("Loading.........",0,0);
+  printAt("~~~~~~~~~~~~~~~~",0,1);
+  delay(30);
+  //lcd2Update();
+}
 
 void loop()
 {
@@ -668,5 +797,6 @@ void loop()
       defaultView();
       break;
   }
+  lcd2Update();
 }
 
